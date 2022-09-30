@@ -1,3 +1,3 @@
 # FlowLenia
 
-Companion website : https://sites.google.com/view/flowlenia/videos
+Companion website : https://sites.google.com/view/flowlenia
