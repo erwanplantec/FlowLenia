@@ -95,7 +95,7 @@ class Rule_space :
 
 
 
-def compile_kernel_computer(SX: int, SY: int, nb_k: int)->t.Callable[Params, CompiledParams]:
+def compile_kernel_computer(SX: int, SY: int, nb_k: int)->t.Callable[[Params], CompiledParams]:
     """return a jit compiled function taking as input lenia raw params and returning computed kernels (compiled params)
     
     Args:
@@ -190,7 +190,7 @@ class FlowLenia :
 
     #------------------------------------------------------------------------------
 
-    def _build_step_fn(self)->t.Callable[t.Tuple[FL_State, CompiledParams], FL_State]:
+    def _build_step_fn(self)->t.Callable[[FL_State, CompiledParams], FL_State]:
         """Build step function of the system according to config
         
         Returns:
@@ -288,7 +288,7 @@ class FlowLenia :
 
     #------------------------------------------------------------------------------
 
-    def _build_rollout(self)->t.Callable[t.Tuple[CompiledParams, FL_State, int], t.Tuple[FL_State, FL_State]]:
+    def _build_rollout(self)->t.Callable[[CompiledParams, FL_State, int], t.Tuple[FL_State, FL_State]]:
         """build rollout function
         
         Returns:
@@ -390,7 +390,7 @@ class FlowLeniaParams:
 
     #------------------------------------------------------------------------------
 
-    def _build_step_fn(self)->t.Callable[t.Tuple[FLP_State, CompiledParams], FLP_State]:
+    def _build_step_fn(self)->t.Callable[[FLP_State, CompiledParams], FLP_State]:
         """build step function
         
         Returns:
