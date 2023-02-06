@@ -75,7 +75,7 @@ class Rule_space :
             'R' : {'low' : 2., 'high' : 25., 'mut_std' : .2, 'shape' : None},
         }
     #-----------------------------------------------------------------------------
-    def sample(self)->Params:
+    def sample(self, key: jnp.ndarray)->Params:
         """sample a random set of parameters
         
         Returns:
@@ -83,14 +83,18 @@ class Rule_space :
         """
         kernels = {}
         for k in 'rmsh':
-          kernels[k] = np.random.uniform(
-              self.spaces[k]['low'], self.spaces[k]['high'], self.nb_k
-          )
+            key, subkey = jax.random.split(key)
+            kernels[k] = jax.random.uniform(
+              key=subkey, minval=self.spaces[k]['low'], maxval=self.spaces[k]['high'], 
+              shape=(self.nb_k,)
+            )
         for k in "awb":
-          kernels[k] = np.random.uniform(
-              self.spaces[k]['low'], self.spaces[k]['high'], (self.nb_k, 3)
-          )
-        R = np.random.uniform(self.spaces['R']['low'], self.spaces['R']['high'])
+            key, subkey = jax.random.split(key)
+            kernels[k] = jax.random.uniform(
+              key=subkey, minval=self.spaces[k]['low'], maxval=self.spaces[k]['high'], 
+              shape=(self.nb_k, 3)
+            )
+        R = jax.random.uniform(key=key, minval=self.spaces['R']['low'], maxval=self.spaces['R']['high'])
         return Params(R=R, **kernels)
 
 
