@@ -7,6 +7,7 @@ import typing as t
 from flowlenia.flowlenia import (RuleSpace, KernelComputer, Config as FL_Config, State as FL_State,
 	Params, CompiledParams)
 from flowlenia.reintegration_tracking import ReintegrationTracking
+from flowlenia.utils import *
 
 @chex.dataclass
 class Config(FL_Config):
@@ -40,7 +41,7 @@ class FlowLeniaParams:
         """_
         
         Args:
-            config (FLP_Config): config of the system
+            config (Config): config of the system
         """
         
         self.config = config
@@ -63,7 +64,7 @@ class FlowLeniaParams:
         """build step function
         
         Returns:
-            t.Callable[[FLP_State, CompiledParams], FLP_State]: step function
+            t.Callable[[State, CompiledParams], State]: step function
         """
         
 
@@ -77,23 +78,23 @@ class FlowLeniaParams:
             
             
             Args:
-                state (FLP_State): state of the system where A are actications and P is the paramter map
+                state (State): state of the system where A are actications and P is the paramter map
                 params (CompiledParams): compiled params of update rule
             
             Returns:
-                FLP_State: new state of the systems
+                State: new state of the systems
             """
             A, P = state.A, state.P
             #---------------------------Original Lenia------------------------------------
             fA = jnp.fft.fft2(A, axes=(0,1))  # (x,y,c)
 
-            fAk = fA[:, :, c0]  # (x,y,k)
+            fAk = fA[:, :, self.config.c0]  # (x,y,k)
 
             U = jnp.real(jnp.fft.ifft2(params.fK * fAk, axes=(0,1)))  # (x,y,k)
 
             U = growth(U, params.m, params.s) * P # (x,y,k)
 
-            U = jnp.dstack([ U[:, :, c1[c]].sum(axis=-1) for c in range(self.config.C) ])  # (x,y,c)
+            U = jnp.dstack([ U[:, :, self.config.c1[c]].sum(axis=-1) for c in range(self.config.C) ])  # (x,y,c)
 
             #-------------------------------FLOW------------------------------------------
 
@@ -107,7 +108,7 @@ class FlowLeniaParams:
 
             nA, nP = self.RT.apply(A, P, F)
 
-            return FLP_State(A=nA, P=nP)
+            return State(A=nA, P=nP)
 
         return step
 
@@ -124,26 +125,26 @@ class FlowLeniaParams:
             """Summary
             
             Args:
-                carry (t.Tuple[FLP_State, CompiledParams]): state of the system [state x params]
+                carry (t.Tuple[State, CompiledParams]): state of the system [state x params]
                 x: None
             
             Returns:
-                t.Tuple[t.Tuple[FLP_State, CompiledParams], FLP_State]: rollout function
+                t.Tuple[t.Tuple[State, CompiledParams], State]: rollout function
             """
             state, params = carry
             nstate = jax.jit(self.step_fn)(state, params)
             return (nstate, params), nstate
 
-        def rollout(params: CompiledParams, init_state: FLP_State, steps: int) -> t.Tuple[FLP_State, FLP_State]:
+        def rollout(params: CompiledParams, init_state: State, steps: int) -> t.Tuple[State, State]:
             """Summary
             
             Args:
                 params (CompiledParams): compiled params of the systems
-                init_state (FLP_State): initial state of the system
+                init_state (State): initial state of the system
                 steps (int): number of steps to simulate
             
             Returns:
-                t.Tuple[FLP_State, FLP_State]: returns the final state and the stacked states of the rollout
+                t.Tuple[State, State]: returns the final state and the stacked states of the rollout
             """
             return jax.lax.scan(scan_step, (init_state, params), None, length = steps)
 

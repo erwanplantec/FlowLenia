@@ -14,6 +14,7 @@ class ReintegrationTracking:
         self.has_hidden = has_hidden
         self.hidden_dims = hidden_dims
         self.border = border if border in ['wall', 'torus'] else 'wall'
+        self.mix = mix
         
         self.apply = self._build_apply()
 
@@ -65,6 +66,8 @@ class ReintegrationTracking:
         #-----------------------------------------------------------------------------------------------
         else :
 
+
+
             @partial(jax.vmap, in_axes = (None, None, None, 0, 0))
             def step_flow(X, H, mu, dx, dy):
                 """Summary
@@ -94,17 +97,17 @@ class ReintegrationTracking:
                     mu = jnp.clip(mu, self.sigma, self.SX-self.sigma)
                 nX, nH = step_flow(X, H, mu, dxs, dys)
 
-                if mix == 'avg':
+                if self.mix == 'avg':
                     nH = jnp.sum(nH * nX.sum(axis = -1, keepdims = True), axis = 0)  
                     nX = jnp.sum(nH, axis = 0)
                     nH = nH / (nX.sum(axis = -1, keepdims = True)+1e-10)
 
-                elif mix == "softmax":
+                elif self.mix == "softmax":
                     expnX = jnp.exp(nX.sum(axis = -1, keepdims = True)) - 1
                     nX = jnp.sum(nX, axis = 0)
                     nH = jnp.sum(nH * expnX, axis = 0) / (expnX.sum(axis = 0)+1e-10) #avg rule
 
-                elif mix == "stoch":
+                elif self.mix == "stoch":
                     categorical=jax.random.categorical(
                       jax.random.PRNGKey(42), 
                       jnp.log(nX.sum(axis = -1, keepdims = True)), 
@@ -114,7 +117,7 @@ class ReintegrationTracking:
                     nH = jnp.sum(nH * mask, axis = 0)
                     nX = jnp.sum(nX, axis = 0)
 
-                elif mix == "stoch_gene_wise":
+                elif self.mix == "stoch_gene_wise":
                     mask = jnp.concatenate(
                       [jax.nn.one_hot(jax.random.categorical(
                                                             jax.random.PRNGKey(42), 
