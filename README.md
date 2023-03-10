@@ -33,6 +33,7 @@ Implementation of Flow Lenia with parameter embedding mechanism.
 
 Small examples showing how to use the flowlenia codebase.
 
+- FlowLenia.ipynb : Flow Lenia demo
 - example_1C.py : Instantiation of 1-channel multi-kernels Flow Lenia.
 - example_2C.py : 2-channels multi-kernels Flow Lenia
 - parameter_embedding.py : Instantitation of Flow Lenia with parameter embedding.
