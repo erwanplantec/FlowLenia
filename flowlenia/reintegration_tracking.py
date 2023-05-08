@@ -10,14 +10,7 @@ class ReintegrationTracking:
         self.SY = SY
         self.dt = dt
         self.dd = dd
-        # sigma = jnp.array(sigma)
-        # if len(sigma.shape) == 2:
-        #     self.sigma = sigma[..., None, None]
-        # elif len(sigma.shape) == 3:
-        #     self.sigma = sigma[..., None]
-        # else :
-        #     self.sigma = sigma
-        sigma = self.sigma
+        self.sigma = sigma
         self.has_hidden = has_hidden
         self.hidden_dims = hidden_dims
         self.border = border if border in ['wall', 'torus'] else 'wall'
