@@ -1,151 +1,118 @@
 import jax
 import jax.numpy as jnp
-import chex
-from functools import partial
-import typing as t
+import jax.random as jr
+import equinox as eqx
+from typing import NamedTuple, Optional
 
-from flowlenia.flowlenia import (RuleSpace, KernelComputer, Config as FL_Config, State as FL_State,
-	Params, CompiledParams)
+from jaxtyping import Array, Float
+
 from flowlenia.reintegration_tracking import ReintegrationTracking
 from flowlenia.utils import *
 
-@chex.dataclass
-class Config(FL_Config):
+class Config(NamedTuple):
+    X: int=128
+    Y: int=128
+    C: int=1
+    c0: list[int]=[0]
+    c1: list[list[int]]=[[0]]
+    k: int=10
+    dd: int=5
+    dt: float=0.2
+    sigma: float=.65
+    border: str="wall"
+    mix_rule: str="stoch"
 
-    """Summary
-    """
-    mix: str = 'stoch'
+class State(NamedTuple):
+    A: Float[Array, "X Y C"]
+    P: Float[Array, "X Y K"]
+    fK:jax.Array
 
-@chex.dataclass
-class State(FL_State):
 
-    """state of system
-    """
-    P: jnp.ndarray
-
-class FlowLeniaParams:
-
-    """Flow Lenia system with parameters embedding
+class FlowLeniaParams(eqx.Module):
     
-    Attributes:
-        config (TYPE): config of the system
-        kernel_computer (TYPE): -
-        rollout_fn (TYPE): -
-        rule_space (TYPE): -
-        step_fn (TYPE): -
     """
-    
-    #------------------------------------------------------------------------------
+    """
+    #-------------------------------------------------------------------
+    # Parameters:
+    R: Float
+    r: Float[Array, "k"]
+    m: Float[Array, "k"]
+    s: Float[Array, "k"]
+    a: Float[Array, "k 3"]
+    b: Float[Array, "k 3"]
+    w: Float[Array, "k 3"]
+    # Statics:
+    cfg: Config
+    RT: ReintegrationTracking
+    #-------------------------------------------------------------------
 
-    def __init__(self, config: Config):
-        """_
+    def __init__(self, cfg: Config, *, key: jax.Array):
+
+        # ---
+        self.cfg = cfg
+        # ---
+        kR, kr, km, ks, ka, kb, kw = jr.split(key, 7)
+        self.R = jr.uniform(kR, (    ), minval=2.000, maxval=25.0)
+        self.r = jr.uniform(kr, (cfg.k,  ), minval=0.200, maxval=1.00)
+        self.m = jr.uniform(km, (cfg.k,  ), minval=0.050, maxval=0.50) 
+        self.s = jr.uniform(ks, (cfg.k,  ), minval=0.001, maxval=0.18)
+        self.a = jr.uniform(ka, (cfg.k, 3), minval=0.000, maxval=1.00)
+        self.b = jr.uniform(kb, (cfg.k, 3), minval=0.001, maxval=1.00)
+        self.w = jr.uniform(kw, (cfg.k, 3), minval=0.010, maxval=0.50)
+        # ---
+        self.RT = ReintegrationTracking(cfg.X, cfg.Y, cfg.dt, cfg.dd, cfg.sigma, 
+                                        cfg.border, has_hidden=True, mix=cfg.mix_rule)
+
+    #-------------------------------------------------------------------
+
+    def __call__(self, state: State, key: Optional[jax.Array]=None):
         
-        Args:
-            config (Config): config of the system
-        """
-        
-        self.config = config
-
-        self.rule_space = RuleSpace(config.nb_k)
-
-        self.kernel_computer = KernelComputer(config.SX, config.SY, config.nb_k)
-
-        self.RT = ReintegrationTracking(self.config.SX, self.config.SY, self.config.dt, 
-            self.config.dd, self.config.sigma, self.config.border, has_hidden=True,
-            hidden_dims=self.config.nb_k, mix=self.config.mix)
-
-        self.step_fn = self._build_step_fn()
-
-        self.rollout_fn = self._build_rollout()
-
-    #------------------------------------------------------------------------------
-
-    def _build_step_fn(self)->t.Callable[[State, CompiledParams], State]:
-        """build step function
-        
-        Returns:
-            t.Callable[[State, CompiledParams], State]: step function
-        """
-        
-
-        SX, SY, dd, sigma, dt = (self.config.SX, self.config.SY, self.config.dd,
-                             self.config.sigma, self.config.dt)
-
-
-        def step(state: State, params: CompiledParams)->State:
-            """
-            Main step
-            
-            
-            Args:
-                state (State): state of the system where A are actications and P is the paramter map
-                params (CompiledParams): compiled params of update rule
-            
-            Returns:
-                State: new state of the systems
-            """
-            A, P = state.A, state.P
+        A, P = state.A, state.P
             #---------------------------Original Lenia------------------------------------
-            fA = jnp.fft.fft2(A, axes=(0,1))  # (x,y,c)
+        fA = jnp.fft.fft2(A, axes=(0,1))  # (x,y,c)
 
-            fAk = fA[:, :, self.config.c0]  # (x,y,k)
+        fAk = fA[:, :, self.cfg.c0]  # (x,y,k)
 
-            U = jnp.real(jnp.fft.ifft2(params.fK * fAk, axes=(0,1)))  # (x,y,k)
+        U = jnp.real(jnp.fft.ifft2(state.fK * fAk, axes=(0,1)))  # (x,y,k)
 
-            U = growth(U, params.m, params.s) * P # (x,y,k)
+        U = growth(U, self.m, self.s) * P # (x,y,k)
 
-            U = jnp.dstack([ U[:, :, self.config.c1[c]].sum(axis=-1) for c in range(self.config.C) ])  # (x,y,c)
+        U = jnp.dstack([ U[:, :, self.cfg.c1[c]].sum(axis=-1) for c in range(self.cfg.C) ])  # (x,y,c)
 
-            #-------------------------------FLOW------------------------------------------
+        #-------------------------------FLOW------------------------------------------
 
-            F = sobel(U) #(x, y, 2, c) : Flow
+        F = sobel(U) #(x, y, 2, c) : Flow
 
-            C_grad = sobel(A.sum(axis = -1, keepdims = True)) #(x, y, 2, 1) : concentration gradient
+        C_grad = sobel(A.sum(axis = -1, keepdims = True)) #(x, y, 2, 1) : concentration gradient
 
-            alpha = jnp.clip((A[:, :, None, :]/2)**2, .0, 1.)
+        alpha = jnp.clip((A[:, :, None, :]/2)**2, .0, 1.)
 
-            F = jnp.clip(F * (1 - alpha) - C_grad * alpha, - (dd-sigma), dd - sigma)
+        F = jnp.clip(F * (1 - alpha) - C_grad * alpha, 
+                     -(self.cfg.dd-self.cfg.sigma), 
+                     self.cfg.dd - self.cfg.sigma)
 
-            nA, nP = self.RT.apply(A, P, F)
+        nA, nP = self.RT(A, P, F) #type:ignore
 
-            return State(A=nA, P=nP)
+        return state._replace(A=nA, P=nP)
 
-        return step
+    #-------------------------------------------------------------------
 
-    #------------------------------------------------------------------------------
+    def initialize(self, key: jax.Array)->State:
 
-    def _build_rollout(self):
-        """build a rollout function taking as input params, an initial state and a number of steps
-        and returning the final state of the system and the stacked states
-        
-        Returns:
-            Callable
-        """
-        def scan_step(carry: t.Tuple[State, CompiledParams], x)->t.Tuple[t.Tuple[State, CompiledParams], State]:
-            """Summary
-            
-            Args:
-                carry (t.Tuple[State, CompiledParams]): state of the system [state x params]
-                x: None
-            
-            Returns:
-                t.Tuple[t.Tuple[State, CompiledParams], State]: rollout function
-            """
-            state, params = carry
-            nstate = jax.jit(self.step_fn)(state, params)
-            return (nstate, params), nstate
+        A = jnp.zeros((self.cfg.X, self.cfg.Y, self.cfg.C))
+        P = jnp.zeros((self.cfg.X, self.cfg.Y, self.cfg.k))
+        fK = get_kernels_fft(self.cfg.X, self.cfg.Y, self.cfg.k, self.R, self.r, 
+                             self.a, self.w, self.b)
+        return State(A=A, P=P, fK=fK)
 
-        def rollout(params: CompiledParams, init_state: State, steps: int) -> t.Tuple[State, State]:
-            """Summary
-            
-            Args:
-                params (CompiledParams): compiled params of the systems
-                init_state (State): initial state of the system
-                steps (int): number of steps to simulate
-            
-            Returns:
-                t.Tuple[State, State]: returns the final state and the stacked states of the rollout
-            """
-            return jax.lax.scan(scan_step, (init_state, params), None, length = steps)
 
-        return rollout
+if __name__ == '__main__':
+    cfg = Config()
+    c0, c1 = conn_from_matrix(np.ones((1,1),dtype=int))
+    cfg = cfg._replace(c0=c0, c1=c1)
+    flp = FlowLeniaParams(cfg, key=jr.key(1))
+    s = flp.initialize(jr.key(1))
+    s = flp(s)
+    print(s.A.shape)
+    print(s.P.shape)
+    print(s.fK.shape)

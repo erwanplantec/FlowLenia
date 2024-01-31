@@ -37,6 +37,28 @@ def sobel(A):
 
 
 
+def get_kernels_fft(X, Y, k, R, r, a, w, b):
+
+    """Compute kernels and return a dic containing kernels fft
+    
+    Args:
+        params (Params): raw params of the system
+    
+    Returns:
+        CompiledParams: compiled params which can be used as update rule
+    """
+    mid = X//2
+    Ds = [ np.linalg.norm(np.mgrid[-mid:mid, -mid:mid], axis=0) / 
+          ((R+15) * r[k]) for k in range(k) ]  # (x,y,k)
+    K = jnp.dstack([sigmoid(-(D-1)*10) * ker_f(D, a[k], w[k], b[k]) 
+                    for k, D in zip(range(k), Ds)])
+    nK = K / jnp.sum(K, axis=(0,1), keepdims=True)  # Normalize kernels 
+    fK = jnp.fft.fft2(jnp.fft.fftshift(nK, axes=(0,1)), axes=(0,1))  # Get kernels fft
+
+    return fK
+
+
+
 def get_kernels(SX: int, SY: int, nb_k: int, params):
     mid = SX//2
     Ds = [ np.linalg.norm(np.mgrid[-mid:mid, -mid:mid], axis=0) / 
@@ -65,6 +87,3 @@ def conn_from_matrix(mat):
 def conn_from_lists(c0, c1, C):
     return c0, [[i == c1[i] for i in range(len(c0))] for c in range(C)]
  
-if __name__ == '__main__':
-    rspace = Rule_space(10)
-    rspace.sample()
