@@ -125,7 +125,7 @@ class ReintegrationTracking:
         elif self.mix == "stoch":
             categorical=jax.random.categorical(
               jax.random.PRNGKey(42), 
-              jnp.log(nA.sum(axis = -1, keepdims = True)), 
+              jnp.log(nA.sum(axis=-1, keepdims=True)), 
               axis=0)
             mask=jax.nn.one_hot(categorical,num_classes=(2*self.dd+1)**2,axis=-1)
             mask=jnp.transpose(mask,(3,0,1,2)) 

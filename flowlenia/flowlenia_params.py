@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 from jaxtyping import Array, Float
 
@@ -10,6 +10,8 @@ from flowlenia.reintegration_tracking import ReintegrationTracking
 from flowlenia.utils import *
 
 class Config(NamedTuple):
+    """
+    """
     X: int=128
     Y: int=128
     C: int=1
@@ -23,10 +25,11 @@ class Config(NamedTuple):
     mix_rule: str="stoch"
 
 class State(NamedTuple):
-    A: Float[Array, "X Y C"]
-    P: Float[Array, "X Y K"]
-    fK:jax.Array
-
+    """
+    """
+    A: Float[Array, "X Y C"] #Cells activations
+    P: Float[Array, "X Y K"] #Embedded parameters
+    fK:jax.Array             #Kernels fft
 
 class FlowLeniaParams(eqx.Module):
     
@@ -97,8 +100,22 @@ class FlowLeniaParams(eqx.Module):
 
     #-------------------------------------------------------------------
 
-    def initialize(self, key: jax.Array)->State:
+    def rollout(self, state: State, key: Optional[jax.Array]=None, 
+                steps: int=100)->Tuple[State, State]:
+        def _step(s, x):
+            return self.__call__(s), s
+        return jax.lax.scan(_step, state, None, steps)
 
+    #-------------------------------------------------------------------
+
+    def rollout_(self, state: State, key: Optional[jax.Array]=None, 
+                 steps: int=100)->State:
+        return jax.lax.fori_loop(0, steps, lambda i,s: self.__call__(s), state)
+
+    #-------------------------------------------------------------------
+
+    def initialize(self, key: jax.Array)->State:
+        """Compute the kernels fft and put dummy arrays as placeholders for A and P"""
         A = jnp.zeros((self.cfg.X, self.cfg.Y, self.cfg.C))
         P = jnp.zeros((self.cfg.X, self.cfg.Y, self.cfg.k))
         fK = get_kernels_fft(self.cfg.X, self.cfg.Y, self.cfg.k, self.R, self.r, 
@@ -107,12 +124,19 @@ class FlowLeniaParams(eqx.Module):
 
 
 if __name__ == '__main__':
-    cfg = Config()
-    c0, c1 = conn_from_matrix(np.ones((1,1),dtype=int))
+    import matplotlib.pyplot as plt
+    cfg = Config(X=64, Y=64, C=3, k=9)
+    M = np.array([[2, 1, 0],
+                  [0, 2, 1],
+                  [1, 0, 2]])
+    c0, c1 = conn_from_matrix(M)
     cfg = cfg._replace(c0=c0, c1=c1)
-    flp = FlowLeniaParams(cfg, key=jr.key(1))
+    flp = FlowLeniaParams(cfg, key=jr.key(10))
     s = flp.initialize(jr.key(1))
-    s = flp(s)
-    print(s.A.shape)
-    print(s.P.shape)
-    print(s.fK.shape)
+    locs = jnp.arange(20) + (cfg.X//2-10)
+    A = s.A.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(2), (20, 20, 3)))
+    P = s.P.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(1), (20, 20, 9)))
+    s = s._replace(A=A, P=P)
+    s = flp.rollout_(s, None, 50)
+    plt.imshow(s.A); plt.show()
+

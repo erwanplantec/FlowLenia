@@ -122,11 +122,25 @@ class FlowLenia(eqx.Module):
 
 
 if __name__ == '__main__':
-    cfg = Config(X=32, Y=32, C=2)
-    M = np.array([[5, 0],
-                  [0, 5]])
+    import matplotlib.pyplot as plt
+    cfg = Config(X=64, Y=64, C=3, k=9)
+    M = np.array([[2, 1, 0],
+                  [0, 2, 1],
+                  [1, 0, 2]])
     c0, c1 = conn_from_matrix(M)
     cfg = cfg._replace(c0=c0, c1=c1)
-    fl = FlowLenia(cfg, key=jr.key(1))
+    fl = FlowLenia(cfg, key=jr.key(101))
     s = fl.initialize(jr.key(2))
-    s = fl(s, jr.key(3))
+    locs = jnp.arange(20) + (cfg.X//2-10)
+    A = s.A.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(2), (20, 20, 1)))
+    s = s._replace(A=A)
+    s = fl.rollout_(s, None, 100)
+    plt.imshow(s.A); plt.show()
+
+
+
+
+
+
+
+
