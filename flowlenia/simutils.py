@@ -142,7 +142,6 @@ class Simulator:
 	#-------------------------------------------------------------------
 
 
-
 if __name__ == '__main__':
 	from flowlenia.flowlenia_params import FlowLeniaParams, Config
 	cfg = Config(X=32, Y=32)

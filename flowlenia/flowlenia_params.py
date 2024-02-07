@@ -1,12 +1,13 @@
+from functools import partial
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
 from typing import Callable, NamedTuple, Optional, Tuple
-
 from jaxtyping import Array, Float
 
 from flowlenia.reintegration_tracking import ReintegrationTracking
+from flowlenia.vizutils import display_flp
 from flowlenia.utils import *
 
 class Config(NamedTuple):
@@ -104,7 +105,7 @@ class FlowLeniaParams(eqx.Module):
         # --- Callback ---
 
         if self.clbck is not None:
-            state = self.clbck(state)
+            state = self.clbck(state, key)
         
         # ---
 
@@ -114,10 +115,13 @@ class FlowLeniaParams(eqx.Module):
 
     def rollout(self, state: State, key: Optional[jax.Array]=None, 
                 steps: int=100)->Tuple[State, State]:
-        def _step(s, x):
-            s = self.__call__(s)
-            return s,s
-        return jax.lax.scan(_step, state, None, steps)
+        def _step(c, x):
+            s, k = c
+            k, k_ = jr.split(k)
+            s = self.__call__(s, k_)
+            return [s,k],s
+        [s, _], S = jax.lax.scan(_step, [state,key], None, steps)
+        return s, S
 
     #-------------------------------------------------------------------
 
@@ -135,21 +139,39 @@ class FlowLeniaParams(eqx.Module):
                              self.a, self.w, self.b)
         return State(A=A, P=P, fK=fK)
 
+#===========================================================================================
+#====================================Simulaton utils========================================
+#===========================================================================================
+
+
+def beam_mutation(state: State, key: jax.Array, sz: int=20, p: float=0.01):
+    kmut, kloc, kp = jr.split(key, 3)
+    P = state.P
+    k = P.shape[-1]
+    mut = jnp.ones((sz,sz,k)) * jr.normal(kmut, (1,1,k))
+    loc = jr.randint(kloc, (3,), minval=0, maxval=P.shape[0]-sz).at[-1].set(0)
+    dP = jax.lax.dynamic_update_slice(jnp.zeros_like(P), mut, loc)
+    m = (jr.uniform(kp, ()) < p).astype(float)
+    P = P + dP*m
+    return state._replace(P=P)
+
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    cfg = Config(X=64, Y=64, C=3, k=9)
+    cfg = Config(X=128, Y=128, C=3, k=9)
     M = np.array([[2, 1, 0],
                   [0, 2, 1],
                   [1, 0, 2]])
     c0, c1 = conn_from_matrix(M)
     cfg = cfg._replace(c0=c0, c1=c1)
-    flp = FlowLeniaParams(cfg, key=jr.key(10))
+    flp = FlowLeniaParams(cfg, key=jr.key(1), callback=partial(beam_mutation, sz=20, p=0.1))
     s = flp.initialize(jr.key(1))
     locs = jnp.arange(20) + (cfg.X//2-10)
     A = s.A.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(2), (20, 20, 3)))
-    P = s.P.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(1), (20, 20, 9)))
+    P = s.P.at[jnp.ix_(locs, locs)].set(jnp.ones((20, 20, 9))*jr.uniform(jr.key(111), (1, 1, 9)))
     s = s._replace(A=A, P=P)
-    s = flp.rollout_(s, None, 50)
-    plt.imshow(s.A); plt.show()
+    s, S = flp.rollout(s, jr.key(1), 500)
+    display_flp(S)
+
 
