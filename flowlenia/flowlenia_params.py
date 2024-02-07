@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from typing import NamedTuple, Optional, Tuple
+from typing import Callable, NamedTuple, Optional, Tuple
 
 from jaxtyping import Array, Float
 
@@ -47,15 +47,16 @@ class FlowLeniaParams(eqx.Module):
     # Statics:
     cfg: Config
     RT: ReintegrationTracking
+    clbck: Optional[Callable]
     #-------------------------------------------------------------------
 
-    def __init__(self, cfg: Config, *, key: jax.Array):
+    def __init__(self, cfg: Config, callback: Optional[Callable]=None, *, key: jax.Array):
 
         # ---
         self.cfg = cfg
         # ---
         kR, kr, km, ks, ka, kb, kw = jr.split(key, 7)
-        self.R = jr.uniform(kR, (    ), minval=2.000, maxval=25.0)
+        self.R = jr.uniform(kR, (        ), minval=2.000, maxval=25.0)
         self.r = jr.uniform(kr, (cfg.k,  ), minval=0.200, maxval=1.00)
         self.m = jr.uniform(km, (cfg.k,  ), minval=0.050, maxval=0.50) 
         self.s = jr.uniform(ks, (cfg.k,  ), minval=0.001, maxval=0.18)
@@ -65,13 +66,15 @@ class FlowLeniaParams(eqx.Module):
         # ---
         self.RT = ReintegrationTracking(cfg.X, cfg.Y, cfg.dt, cfg.dd, cfg.sigma, 
                                         cfg.border, has_hidden=True, mix=cfg.mix_rule)
+        # ---
+        self.clbck = callback
 
     #-------------------------------------------------------------------
 
     def __call__(self, state: State, key: Optional[jax.Array]=None):
         
         A, P = state.A, state.P
-            #---------------------------Original Lenia------------------------------------
+            # --- Original Lenia ---
         fA = jnp.fft.fft2(A, axes=(0,1))  # (x,y,c)
 
         fAk = fA[:, :, self.cfg.c0]  # (x,y,k)
@@ -82,7 +85,7 @@ class FlowLeniaParams(eqx.Module):
 
         U = jnp.dstack([ U[:, :, self.cfg.c1[c]].sum(axis=-1) for c in range(self.cfg.C) ])  # (x,y,c)
 
-        #-------------------------------FLOW------------------------------------------
+        # --- FLOW ---
 
         F = sobel(U) #(x, y, 2, c) : Flow
 
@@ -96,14 +99,24 @@ class FlowLeniaParams(eqx.Module):
 
         nA, nP = self.RT(A, P, F) #type:ignore
 
-        return state._replace(A=nA, P=nP)
+        state = state._replace(A=nA, P=nP)
+
+        # --- Callback ---
+
+        if self.clbck is not None:
+            state = self.clbck(state)
+        
+        # ---
+
+        return state
 
     #-------------------------------------------------------------------
 
     def rollout(self, state: State, key: Optional[jax.Array]=None, 
                 steps: int=100)->Tuple[State, State]:
         def _step(s, x):
-            return self.__call__(s), s
+            s = self.__call__(s)
+            return s,s
         return jax.lax.scan(_step, state, None, steps)
 
     #-------------------------------------------------------------------

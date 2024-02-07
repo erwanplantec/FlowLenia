@@ -19,6 +19,7 @@ kx = jnp.array([
                 [1., 0., -1.]
 ])
 ky = jnp.transpose(kx)
+
 def sobel_x(A):
     """
     A : (x, y, c)
@@ -85,5 +86,5 @@ def conn_from_matrix(mat):
 
 
 def conn_from_lists(c0, c1, C):
-    return c0, [[i == c1[i] for i in range(len(c0))] for c in range(C)]
+    return c0, [[i == c1[i] for i in range(len(c0))] for _ in range(C)]
  
