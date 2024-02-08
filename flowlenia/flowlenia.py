@@ -68,6 +68,12 @@ class FlowLenia(eqx.Module):
 
     #-------------------------------------------------------------------
 
+    @staticmethod
+    def default_config():
+        return Config()
+
+    #-------------------------------------------------------------------
+
     def __call__(self, state: State, key: Optional[jax.Array]=None)->State:
         
         # --- Lenia ---
