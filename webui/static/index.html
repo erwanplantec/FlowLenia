@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow Lenia Lab</title>
+<style>
+  :root {
+    --bg: #111317; --panel: #1a1d23; --line: #2a2f38; --text: #e6e8eb; --muted: #8b929c;
+    --accent: #6ea8fe; --danger: #f07178; --ok: #7fd18b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px; }
+  main { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  section { border-top: 1px solid var(--line); padding: 10px 0; }
+  label { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 6px; margin: 4px 0; }
+  label.wide { grid-template-columns: 1fr; }
+  label.check { grid-template-columns: auto 1fr; }
+  input, select, textarea, button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+  textarea { width: 100%; font-family: ui-monospace, monospace; resize: vertical; }
+  input[type=range] { padding: 0; }
+  button { cursor: pointer; background: #252a33; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0b1220; border-color: var(--accent); font-weight: 600; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row > button { flex: 1; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #status { min-height: 18px; color: var(--muted); }
+  #status.err { color: var(--danger); white-space: pre-wrap; }
+  #canvas { image-rendering: pixelated; background: #000; border: 1px solid var(--line); cursor: crosshair; touch-action: none;
+            width: min(80vh, calc(100vw - 360px)); height: auto; }
+  #cursor { position: fixed; pointer-events: none; border: 1px solid rgba(255,255,255,.7); border-radius: 50%; display: none; }
+  .stats { display: flex; gap: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--text); font-weight: 500; }
+  #bars { width: min(80vh, calc(100vw - 360px)); height: 90px; }
+  .hidden { display: none !important; }
+  .seed { display: flex; gap: 4px; }
+  .seed input { width: 0; flex: 1; }
+  .dice { padding: 2px 6px; }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    #canvas, #bars { width: calc(100vw - 32px); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+  <h1>Flow Lenia Lab</h1>
+  <div id="status">connecting…</div>
+
+  <section>
+    <h2>Model</h2>
+    <label>model <select id="model"></select></label>
+    <label class="wide">connectivity matrix <span class="hint">M[s][t] = kernels from channel s to t (rows on separate lines)</span>
+      <textarea id="matrix" rows="3">10</textarea></label>
+    <div id="cfg"></div>
+    <label>param seed <span class="seed"><input id="pseed" type="number" value="0"><button class="dice" data-for="pseed" title="random seed">🎲</button></span></label>
+    <label>state seed <span class="seed"><input id="sseed" type="number" value="0"><button class="dice" data-for="sseed" title="random seed">🎲</button></span></label>
+    <label>initial patch <input id="patch" type="number" value="40" min="1"></label>
+    <div class="row"><button id="build" class="primary">Build model</button></div>
+    <div class="row" style="margin-top:6px"><button id="newParams" title="sample new parameters with a random param seed">New params 🎲</button></div>
+    <label class="check"><input id="keepState" type="checkbox" checked> keep current matter on new params</label>
+  </section>
+
+  <section>
+    <h2>Simulation</h2>
+    <div class="row">
+      <button id="play">Play</button><button id="stepbtn">Step</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="reset">Reset patch</button><button id="clear">Clear</button>
+    </div>
+    <label>steps / frame <input id="spf" type="range" min="1" max="20" value="1"></label>
+    <label>max fps <input id="fps" type="range" min="1" max="60" value="30"></label>
+  </section>
+
+  <section>
+    <h2>View</h2>
+    <label>show <select id="view">
+      <option value="matter">matter channels</option>
+      <option value="mass">total matter</option>
+      <option value="hidden_rgb" data-hidden>matter × first 3 hidden</option>
+      <option value="hidden_channel" data-hidden>single hidden channel</option>
+    </select></label>
+    <label id="viewchWrap" class="hidden">channel <input id="viewch" type="number" min="0" value="0"></label>
+  </section>
+
+  <section>
+    <h2>Brush <span class="hint">(drag on the canvas)</span></h2>
+    <div class="tools">
+      <button data-tool="add" class="on">Add matter</button>
+      <button data-tool="erase">Erase</button>
+      <button data-tool="set_hidden" data-hidden>Set <span class="hl">gene</span></button>
+      <button data-tool="random_hidden" data-hidden>Randomize <span class="hl">genes</span></button>
+      <button data-tool="unhold" data-hidden>Release hold</button>
+    </div>
+    <label>radius <input id="radius" type="range" min="1" max="40" value="6"></label>
+    <div id="addOpts">
+      <label>amount <input id="amount" type="range" min="0.01" max="1" step="0.01" value="0.3"></label>
+      <label>matter channel <select id="channel"><option value="-1">all</option></select></label>
+      <label class="check" data-hidden><input id="seedHidden" type="checkbox" checked> random <span class="hl">genes</span> in new matter</label>
+    </div>
+    <div id="hiddenOpts" class="hidden">
+      <label><span class="hl">gene</span> index <select id="hidx"></select></label>
+      <label id="valueWrap">value <input id="value" type="range" min="0" max="1" step="0.01" value="1"></label>
+      <label class="check" id="holdWrap"><input id="hold" type="checkbox"> hold (re-apply every step)</label>
+      <div class="row"><button id="applyAll">Apply to all occupied cells</button></div>
+    </div>
+    <div id="holdOpts" class="hidden data-hidden-wrap">
+      <p class="hint">Held cells are fixed in space: matter passing through them gets the held value.</p>
+    </div>
+    <div class="row" data-hidden style="margin-top:6px"><button id="releaseAll">Release all holds</button></div>
+  </section>
+  <p class="hint">Space: play/pause · S: step · R: reset</p>
+</aside>
+
+<main>
+  <canvas id="canvas" width="128" height="128"></canvas>
+  <div class="stats">
+    <span>step <b id="sStep">–</b></span>
+    <span>mass <b id="sMass">–</b></span>
+    <span>occupied <b id="sOcc">–</b></span>
+    <span>steps/s <b id="sSps">–</b></span>
+    <span id="heldWrap" class="hidden">held cells <b id="sHeld">0</b></span>
+    <span>fps <b id="sFps">–</b></span>
+  </div>
+  <canvas id="bars" class="hidden" width="800" height="90"></canvas>
+</main>
+</div>
+<div id="cursor"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let schema = {}, info = null, running = false, tool = "add";
+let ws, frames = 0, lastFpsT = performance.now();
+
+// ------------------------------------------------------------------ websocket
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => status("connected — pick a model and build it");
+  ws.onclose = () => { status("disconnected — retrying…", true); setTimeout(connect, 1000); };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== "string") return drawFrame(ev.data);
+    const m = JSON.parse(ev.data);
+    if (m.type === "schema") { schema = m.models; fillModels(); }
+    else if (m.type === "built") onBuilt(m);
+    else if (m.type === "status") status(m.msg);
+    else if (m.type === "error") status(m.msg, true);
+    else if (m.type === "running") setRunning(m.value);
+    else if (m.type === "stats") onStats(m);
+  };
+}
+const send = (m) => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+function status(msg, err = false) { const s = $("status"); s.textContent = msg; s.className = err ? "err" : ""; }
+
+// ------------------------------------------------------------------ model / config form
+function fillModels() {
+  const sel = $("model"), prev = sel.value;
+  sel.innerHTML = Object.keys(schema).map((n) => `<option>${n}</option>`).join("");
+  if (prev in schema) sel.value = prev;
+  fillConfig();
+}
+function fillConfig() {
+  const spec = schema[$("model").value];
+  $("cfg").innerHTML = spec.fields.map((f) => {
+    let input;
+    if (f.choices) input = `<select data-cfg="${f.name}">${f.choices.map((c) => `<option ${c === f.default ? "selected" : ""}>${c}</option>`).join("")}</select>`;
+    else if (f.type === "bool") input = `<input type="checkbox" data-cfg="${f.name}" ${f.default ? "checked" : ""}>`;
+    else input = `<input type="${f.type === "str" ? "text" : "number"}" step="any" data-cfg="${f.name}" value="${f.default}">`;
+    return `<label>${f.name} ${input}</label>`;
+  }).join("");
+}
+function readConfig() {
+  const cfg = {};
+  document.querySelectorAll("[data-cfg]").forEach((el) => {
+    cfg[el.dataset.cfg] = el.type === "checkbox" ? el.checked : el.value;
+  });
+  return cfg;
+}
+function readMatrix() {
+  return $("matrix").value.trim().split(/\n|;/).filter(Boolean).map((r) => r.trim().split(/[\s,]+/).map(Number));
+}
+$("model").onchange = fillConfig;
+const randSeed = () => Math.floor(Math.random() * 1e6);
+document.querySelectorAll(".dice").forEach((b) => b.onclick = (e) => { e.preventDefault(); $(b.dataset.for).value = randSeed(); });
+$("newParams").onclick = () => {
+  if (!info) return status("build a model first", true);
+  $("pseed").value = randSeed();
+  status("sampling new parameters…");
+  send({ type: "resample", param_seed: +$("pseed").value, keep_state: $("keepState").checked,
+         state_seed: +$("sseed").value, patch: +$("patch").value });
+};
+$("build").onclick = () => {
+  let matrix;
+  try { matrix = readMatrix(); if (matrix.some((r) => r.length !== matrix.length || r.some(isNaN))) throw 0; }
+  catch { return status("connectivity matrix must be square, numbers separated by spaces", true); }
+  send({ type: "build", model: $("model").value, config: readConfig(), matrix,
+         param_seed: +$("pseed").value, state_seed: +$("sseed").value, patch: +$("patch").value });
+  sendView(); sendSpeed();
+};
+
+function onBuilt(m) {
+  info = m;
+  const cv = $("canvas"); cv.width = m.Y; cv.height = m.X;
+  const hasH = !!m.hidden, label = schema[m.model].hidden_label || "hidden";
+  document.querySelectorAll("[data-hidden]").forEach((el) => el.classList.toggle("hidden", !hasH));
+  document.querySelectorAll(".hl").forEach((el) => el.textContent = el.textContent.endsWith("s") ? label + "s" : label);
+  $("channel").innerHTML = `<option value="-1">all</option>` + [...Array(m.C).keys()].map((c) => `<option value="${c}">${c}</option>`).join("");
+  $("hidx").innerHTML = hasH ? [...Array(m.hidden_dim).keys()].map((i) => `<option value="${i}">${i}</option>`).join("") : "";
+  $("viewch").max = hasH ? m.hidden_dim - 1 : 0;
+  if (!hasH && $("view").value.startsWith("hidden")) { $("view").value = "matter"; sendView(); }
+  if (!hasH && (tool.endsWith("hidden") || tool === "unhold")) selectTool("add");
+  $("bars").classList.toggle("hidden", !hasH);
+  $("pseed").value = m.param_seed;
+  status(`${m.model}: ${m.X}×${m.Y}, C=${m.C}, k=${m.k}${hasH ? `, ${m.hidden_dim} ${label}s` : ""}, param seed ${m.param_seed} — compiled in ${m.compile_s}s`);
+}
+
+// ------------------------------------------------------------------ simulation controls
+function setRunning(v) { running = v; $("play").textContent = v ? "Pause" : "Play"; $("play").classList.toggle("on", v); }
+$("play").onclick = () => send({ type: running ? "pause" : "play" });
+$("stepbtn").onclick = () => send({ type: "step", n: +$("spf").value });
+$("reset").onclick = () => send({ type: "reset", state_seed: +$("sseed").value, patch: +$("patch").value });
+$("clear").onclick = () => send({ type: "clear" });
+const sendSpeed = () => send({ type: "set", spf: +$("spf").value, fps: +$("fps").value });
+$("spf").oninput = $("fps").oninput = sendSpeed;
+const sendView = () => {
+  $("viewchWrap").classList.toggle("hidden", $("view").value !== "hidden_channel");
+  send({ type: "view", view: $("view").value, channel: +$("viewch").value });
+};
+$("view").onchange = $("viewch").oninput = sendView;
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input[type=text], input[type=number], textarea")) return;
+  if (e.code === "Space") { e.preventDefault(); $("play").click(); }
+  else if (e.key === "s") $("stepbtn").click();
+  else if (e.key === "r") $("reset").click();
+});
+
+// ------------------------------------------------------------------ brush
+function selectTool(t) {
+  tool = t;
+  document.querySelectorAll("[data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t));
+  $("addOpts").classList.toggle("hidden", t !== "add");
+  $("hiddenOpts").classList.toggle("hidden", !t.endsWith("hidden"));
+  $("holdOpts").classList.toggle("hidden", t !== "unhold");
+  $("valueWrap").classList.toggle("hidden", t !== "set_hidden");
+  $("holdWrap").classList.toggle("hidden", t !== "set_hidden");
+}
+document.querySelectorAll("[data-tool]").forEach((b) => b.onclick = () => selectTool(b.dataset.tool));
+
+function brushMsg(x, y, radius) {
+  return { type: "brush", tool, x, y, radius, amount: +$("amount").value, channel: +$("channel").value,
+           hidx: +$("hidx").value, value: +$("value").value, seed_hidden: $("seedHidden").checked,
+           hold: $("hold").checked };
+}
+$("applyAll").onclick = () => info && send(brushMsg(0, 0, 1e6));
+$("releaseAll").onclick = () => send({ type: "release" });
+
+const cv = $("canvas"), cur = $("cursor");
+let painting = false, pending = null;
+function cellAt(e) {
+  const r = cv.getBoundingClientRect();
+  return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height];
+}
+function queueBrush(e) {
+  const [x, y] = cellAt(e);
+  pending = brushMsg(x, y, +$("radius").value);
+}
+function flushBrush() { if (pending) { send(pending); pending = null; } if (painting) requestAnimationFrame(flushBrush); }
+cv.addEventListener("pointerdown", (e) => { if (!info) return; painting = true; cv.setPointerCapture(e.pointerId); queueBrush(e); flushBrush(); });
+cv.addEventListener("pointermove", (e) => {
+  const r = cv.getBoundingClientRect(), px = +$("radius").value / cv.width * r.width;
+  Object.assign(cur.style, { display: "block", width: `${2 * px}px`, height: `${2 * px}px`,
+                             left: `${e.clientX - px}px`, top: `${e.clientY - px}px` });
+  if (painting) queueBrush(e);
+});
+cv.addEventListener("pointerup", () => { painting = false; });
+cv.addEventListener("pointerleave", () => { cur.style.display = "none"; });
+
+// ------------------------------------------------------------------ rendering
+const ctx = cv.getContext("2d");
+function drawFrame(buf) {
+  if (!info || buf.byteLength !== cv.width * cv.height * 4) return;
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(buf), cv.width, cv.height), 0, 0);
+  frames++;
+  const now = performance.now();
+  if (now - lastFpsT > 500) { $("sFps").textContent = (frames * 1000 / (now - lastFpsT)).toFixed(0); frames = 0; lastFpsT = now; }
+}
+function onStats(m) {
+  $("sStep").textContent = m.step; $("sMass").textContent = m.mass.toFixed(1);
+  $("sOcc").textContent = m.occupied; $("sSps").textContent = running ? m.sps : "–";
+  if (m.hidden_mean) drawBars(m.hidden_mean);
+  $("heldWrap").classList.toggle("hidden", !m.held); $("sHeld").textContent = m.held;
+}
+function drawBars(v) {
+  const c = $("bars"), g = c.getContext("2d"), W = c.width, H = c.height, n = v.length;
+  const sel = tool.endsWith("hidden") ? +$("hidx").value : ($("view").value === "hidden_channel" ? +$("viewch").value : -1);
+  g.clearRect(0, 0, W, H);
+  const bw = W / n, pad = Math.min(4, bw * 0.2);
+  g.font = "11px system-ui"; g.textAlign = "center";
+  v.forEach((x, i) => {
+    const h = Math.max(0, Math.min(1, x)) * (H - 18);
+    g.fillStyle = i < 3 ? ["#f07178", "#7fd18b", "#6ea8fe"][i] : "#8b929c";
+    if (i === sel) g.fillStyle = "#ffd866";
+    g.fillRect(i * bw + pad, H - 14 - h, bw - 2 * pad, h);
+    g.fillStyle = "#8b929c"; g.fillText(i, i * bw + bw / 2, H - 2);
+  });
+}
+connect();
+</script>
+</body>
+</html>

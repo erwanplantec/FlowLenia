@@ -1,0 +1,19 @@
+# Train plain FlowLenia (no hidden state) to form a star; shape only.
+# Run: uv run python -m training.train training/configs/star.yml
+out_dir: runs/star
+
+target:
+  name: star
+  size: 36
+
+model:
+  name: FlowLenia
+  matrix: [[10]]
+  config:
+    X: 64
+    Y: 64
+    update_mode: mace
+    mace_temp: 0.5
+
+training:
+  iterations: 600

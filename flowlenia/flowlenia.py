@@ -6,27 +6,32 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 import jax.random as jr
 import equinox as eqx
-from typing import NamedTuple, Optional, Tuple
 from jaxtyping import Float, Array
+from flax.struct import PyTreeNode
+from typing import Tuple
+from dataclasses import field
 
 from flowlenia.utils import *
 from flowlenia.reintegration_tracking import ReintegrationTracking
+from flowlenia.mace import MaceUpdate
 
+type UpdateFunction = ReintegrationTracking | MaceUpdate
 
-
-class Config(NamedTuple):
+class Config(PyTreeNode):
     X: int=128
     Y: int=128
     C: int=1
-    c0: list[int]=[0]
-    c1: list[list[int]]=[[0]]
+    c0: list[int]=field(default_factory=lambda: [0])
+    c1: list[list[int]]=field(default_factory=lambda: [[0]])
     k: int=10
+    update_mode: str="rt"
     dd: int=5
     dt: float=0.2
     sigma: float=.65
     border: str="wall"
+    mace_temp: float=0.1
 
-class State(NamedTuple):
+class State(PyTreeNode):
     A: Float[Array, "X Y C"]
     fK: Float[Array, "X Y k"]
 
@@ -45,7 +50,8 @@ class FlowLenia(eqx.Module):
     w: Float[Array, "k 3"]
     # Statics
     cfg: Config
-    RT: ReintegrationTracking
+    update_mode: str
+    update_func: UpdateFunction
     #-------------------------------------------------------------------
 
     def __init__(self, cfg: Config, key: jax.Array):
@@ -63,8 +69,14 @@ class FlowLenia(eqx.Module):
         self.b = jr.uniform(kb, (cfg.k, 3), minval=0.001, maxval=1.00)
         self.w = jr.uniform(kw, (cfg.k, 3), minval=0.010, maxval=0.50)
         # ---
-        self.RT = ReintegrationTracking(cfg.X, cfg.Y, cfg.dt, cfg.dd, cfg.sigma, 
-                                        cfg.border, has_hidden=False)
+        self.update_mode = cfg.update_mode
+        if cfg.update_mode == "rt":
+            self.update_func = ReintegrationTracking(cfg.X, cfg.Y, cfg.dt, cfg.dd, cfg.sigma, 
+                                                     cfg.border, has_hidden=False)
+        elif cfg.update_mode=="mace":
+            self.update_func = MaceUpdate(cfg.mace_temp)
+        else:
+            raise ValueError(f"no update mode called {cfg.update_mode}")
 
     #-------------------------------------------------------------------
 
@@ -74,7 +86,7 @@ class FlowLenia(eqx.Module):
 
     #-------------------------------------------------------------------
 
-    def __call__(self, state: State, key: Optional[jax.Array]=None)->State:
+    def __call__(self, state: State, key: jax.Array)->State:
         
         # --- Lenia ---
         A = state.A
@@ -91,31 +103,30 @@ class FlowLenia(eqx.Module):
 
         # --- Flow ---
 
-        nabla_U = sobel(U) #(x, y, 2, c)
+        if self.update_mode=="rt":
+            nabla_U = sobel(U) #(x, y, 2, c)
+            nabla_A = sobel(A.sum(axis = -1, keepdims = True)) #(x, y, 2, 1)
+            alpha = jnp.clip((A[:, :, None, :]/self.cfg.C)**2, .0, 1.)
+            U = nabla_U * (1 - alpha) - nabla_A * alpha
+        
+        nA = self.update_func(A, U, key) 
 
-        nabla_A = sobel(A.sum(axis = -1, keepdims = True)) #(x, y, 2, 1)
-
-        alpha = jnp.clip((A[:, :, None, :]/self.cfg.C)**2, .0, 1.)
-
-        F = nabla_U * (1 - alpha) - nabla_A * alpha
-        nA = self.RT(A, F) #type:ignore
-
-        return state._replace(A=nA)
+        return state.replace(A=nA)
     
     #-------------------------------------------------------------------
 
-    def rollout(self, state: State, key: Optional[jax.Array]=None, 
+    def rollout(self, state: State, key: jax.Array, 
                 steps: int=100)->Tuple[State, State]:
 
         def _step(s, x):
-            return self.__call__(s), s
+            return self.__call__(s, key), s
         return jax.lax.scan(_step, state, None, steps)
 
     #-------------------------------------------------------------------
 
-    def rollout_(self, state: State, key: Optional[jax.Array]=None, 
+    def rollout_(self, state: State, key: jax.Array, 
                  steps: int=100)->State:
-        return jax.lax.fori_loop(0, steps, lambda i,s: self.__call__(s), state)
+        return jax.lax.fori_loop(0, steps, lambda i,s: self.__call__(s, key), state)
 
     #-------------------------------------------------------------------
 
@@ -134,13 +145,13 @@ if __name__ == '__main__':
                   [0, 2, 1],
                   [1, 0, 2]])
     c0, c1 = conn_from_matrix(M)
-    cfg = cfg._replace(c0=c0, c1=c1)
+    cfg = cfg.replace(c0=c0, c1=c1)
     fl = FlowLenia(cfg, key=jr.key(101))
     s = fl.initialize(jr.key(2))
     locs = jnp.arange(20) + (cfg.X//2-10)
     A = s.A.at[jnp.ix_(locs, locs)].set(jr.uniform(jr.key(2), (20, 20, 1)))
-    s = s._replace(A=A)
-    s = fl.rollout_(s, None, 100)
+    s = s.replace(A=A)
+    s = fl.rollout_(s, jr.key(0), 100)
     plt.imshow(s.A); plt.show()
 
 

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from flowlenia.utils import conn_from_matrix
 
-seed = 1111
+seed = np.random.randint(0,10000)
 key = jr.key(seed)
 # --- 1. Set system config
 M = np.array([[3, 1, 0],
@@ -16,7 +16,7 @@ M = np.array([[3, 1, 0],
               [1, 0, 3]], dtype=int)
 k = M.sum()
 c0, c1 = conn_from_matrix(M)
-cfg = Config(X=128, Y=128, C=3, k=k, c0=c0, c1=c1)
+cfg = Config(X=128, Y=128, C=3, k=k, c0=c0, c1=c1, mace_temp=0.3, update_mode="mace")
 # --- 2. initialize system
 key, key_fl = jr.split(key)
 fl = FlowLenia(cfg, key=jr.key(seed))
@@ -24,9 +24,9 @@ fl = FlowLenia(cfg, key=jr.key(seed))
 key, key_A = jr.split(key)
 s = fl.initialize(jr.key(1))
 A = s.A.at[44:84, 44:84, :].set(jr.uniform(key_A, (40, 40, cfg.C)))
-s = s._replace(A=A)
+s = s.replace(A=A)
 # --- 4. Simulate rollout
-s, ss = fl.rollout(s, steps=100)
+s, ss = fl.rollout(s, jr.key(0), steps=100)
 # --- 5. Display
 ims = []
 fig, ax = plt.subplots()

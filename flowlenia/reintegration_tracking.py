@@ -28,7 +28,7 @@ class ReintegrationTracking:
 
     #-------------------------------------------------------------------
 
-    def _apply_without_hidden(self, A: jax.Array, F: jax.Array)->jax.Array:
+    def _apply_without_hidden(self, A: jax.Array, F: jax.Array, key: jax.Array|None=None)->jax.Array:
 
         x, y = jnp.arange(self.SX), jnp.arange(self.SY)
         X, Y = jnp.meshgrid(x, y)
@@ -70,7 +70,7 @@ class ReintegrationTracking:
 
     #-------------------------------------------------------------------
 
-    def _apply_with_hidden(self, A: jax.Array, H: jax.Array, F: jax.Array):
+    def _apply_with_hidden(self, A: jax.Array, F: jax.Array, H: jax.Array,  key: jax.Array):
 
         x, y = jnp.arange(self.SX), jnp.arange(self.SY)
         X, Y = jnp.meshgrid(x, y)
@@ -124,7 +124,7 @@ class ReintegrationTracking:
 
         elif self.mix == "stoch":
             categorical=jax.random.categorical(
-              jax.random.PRNGKey(42), 
+              key, 
               jnp.log(nA.sum(axis=-1, keepdims=True)), 
               axis=0)
             mask=jax.nn.one_hot(categorical,num_classes=(2*self.dd+1)**2,axis=-1)
@@ -135,7 +135,7 @@ class ReintegrationTracking:
         elif self.mix == "stoch_gene_wise":
             mask = jnp.concatenate(
               [jax.nn.one_hot(jax.random.categorical(
-                                                    jax.random.PRNGKey(42), 
+                                                    key, 
                                                     jnp.log(nA.sum(axis = -1, keepdims = True)), 
                                                     axis=0),
                               num_classes=(2*dd+1)**2,axis=-1)

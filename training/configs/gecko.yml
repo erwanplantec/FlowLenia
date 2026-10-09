@@ -1,0 +1,43 @@
+# Train GRNFlowLenia to form a gecko: matter takes the gecko's shape, first 3 genes its colors.
+# Any option left out uses the default in training/train.py (DEFAULTS).
+# Run: uv run python -m training.train training/configs/gecko.yml
+seed: 24
+out_dir: runs/gecko
+
+target:
+  name: gecko          # gecko, butterfly, fish, ..., circle, ring, star, emoji:<char>, text:<chars>, image:<path>
+  size: 40             # fit the target in a 40x40 box at the grid center
+  density: 1.0         # target matter density where the target is opaque
+  color: false          # fit genes 0-2 to the target RGB
+
+model:
+  name: GRNFlowLenia
+  matrix: [[16]]       # 1 channel, 10 kernels
+  param_seed: 8
+  config:              # any field of the model's Config
+    X: 64
+    Y: 64
+    update_mode: mace
+    mace_temp: 0.3
+    nb_genes: 32
+    growth: false     # growth is not differentiable (hard threshold) and breaks mass conservation
+
+init:
+  patch: 24            # initial random square; its mass is rescaled to the target's total mass
+
+training:
+  iterations: 10_000
+  batch_size: 1
+  steps: [60, 90]      # rollout length: loss evaluated at a random step in this range
+  loss_window: 5       # ...averaged over the 5 steps before it
+  lr: 1.0e-3
+  lr_end: 1.0e-4
+  grad_clip: 1.0
+  color_weight: 1.0
+  remat: true
+  log_every: 10
+  save_every: 100
+
+eval:
+  steps: 300
+  fps: 30
